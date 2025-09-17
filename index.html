@@ -8,6 +8,7 @@
         <meta name="og:title" content="Sistema contable-CPA">
         <meta name="og:type" content = "website">
         <meta name="og:image" content = "">
+        <link href = "./login_styles.css" rel = "stylesheet">
 
         <title>Sistema contable-CPA</title>
         
@@ -16,13 +17,14 @@
         <div>
             <form>
                 <fieldset>
+                    <legend>Login</legend>
                     <label for="user">Usuario:</label> <br/>
-                    <input id="user" name = "user" type="text" placeholder="Ingrese usuario"> 
+                    <input id="user" name = "user" type="text" placeholder="Ingrese usuario"> <br/>
+                    <br/>
                     <div>
                         <label>Contraseña:</label>
                         <input id="password" name = "password" type="password" placeholder="Ingrese contraseña">
-                        
-                        <label for = "is_password_visible">Mostrar contraseña</label>
+                        <label for = "is_password_visible">Mostrar contraseña</label> 
                         <input id ="is_password_visible" name = "is_password_visible" type="checkbox">
                     </div>
                 </fieldset>
