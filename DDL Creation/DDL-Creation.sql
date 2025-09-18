@@ -221,16 +221,42 @@ CREATE TABLE servicios_educativos.producto_educativo (
     version_registro       INT DEFAULT 1
 );
 
+CREATE TABLE servicios_educativos.horarios(
+	id_horario				bigserial primary key,
+	repeticion	    		text check(repeticion IN ('CADA SEMANA', 'CADA QUINCENA', 'CADA MES')),
+	hora_inicio_lunes		time,
+	hora_inicio_martes		time,
+	hora_inicio_miercoles	time,
+	hora_inicio_jueves		time,
+	hora_inicio_viernes 	time,
+	hora_inicio_sabado		time,
+	hora_fin_lunes			time,
+	hora_fin_martes			time,
+	hora_fin_miercoles		time,
+	hora_fin_jueves			time,
+	hora_fin_viernes 		time,
+	hora_fin_sabado			time,
+		
+    -- Auditoría
+    fecha_registro         TIMESTAMP DEFAULT now(),
+    estado_registro        BOOLEAN DEFAULT TRUE,
+    id_usuario             BIGINT,
+    id_usuario_modificacion BIGINT,
+    version_registro       INT DEFAULT 1
+);
+
 
 CREATE TABLE servicios_educativos.curso_version (
     id_curso_version       BIGSERIAL PRIMARY KEY,
     id_producto_educativo  BIGINT NOT NULL
                             REFERENCES servicios_educativos.producto_educativo(id_producto_educativo) ON DELETE CASCADE,
     nombre_version         VARCHAR(150) NOT NULL, -- Ej: “Álgebra 2025 - Edición I”
+	
     descripcion_version    TEXT,
     fecha_inicio           DATE,
     fecha_fin              DATE,
     precio_version         NUMERIC(12,2) CHECK (precio_version IS NULL OR precio_version >= 0),
+    id_horario			   int references servicios_educativos.horarios(id_horario),
 
     -- Auditoría
     fecha_registro         TIMESTAMP DEFAULT now(),
@@ -445,8 +471,6 @@ CREATE TABLE servicios_educativos.clase_curso (
     -- Vínculos académicos
     id_curso_version      BIGINT NOT NULL
                            REFERENCES servicios_educativos.curso_version(id_curso_version) ON DELETE CASCADE,
-    id_horario            BIGINT
-                           REFERENCES servicios_educativos.horario(id_horario) ON DELETE SET NULL,
 
     -- Recursos
     id_aula               BIGINT
