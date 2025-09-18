@@ -256,23 +256,229 @@ CREATE TABLE servicios_educativos.paquetes_producto_educativo (
 );
 
 
-CREATE TABLE personas.perso
+
+CREATE TABLE persona.unidad_educativa (
+    id_unidad_educativa     bigserial PRIMARY KEY,
+    
+    -- Datos principales
+    nombre                  varchar(150) NOT NULL,
+    latitud                 decimal(9,6),   -- latitud en formato decimal
+    longitud                decimal(9,6),   -- longitud en formato decimal
+    categoria               varchar(20) NOT NULL
+                             CHECK (categoria IN ('privada', 'convenio', 'fiscal')),
+    
+    -- Auditoría
+    fecha_registro          timestamp DEFAULT now(),
+    id_usuario              bigint,
+    id_usuario_modificacion bigint,
+    version_registro        int DEFAULT 1,
+    estado_registro         boolean DEFAULT true
+);
+
+CREATE TABLE persona.persona_estudiante (
+    id_persona              bigint primary key NOT NULL 
+                             REFERENCES persona.persona(id_persona) ON DELETE CASCADE,
+    
+    codigo_estudiante       varchar(50) UNIQUE, 
+    id_unidad_educativa     int REFERENCES persona.unidad_educativa(id_unidad_educativa),
+
+    -- Tipo de estudiante
+    tipo                    varchar(50) CHECK (tipo IN ('UNIVERSITARIO', 'COLEGIAL')),
+    
+    -- Solo colegiales
+    nivel_actual            varchar(50) CHECK (nivel_actual IN ('PRIMARIA', 'SECUNDARIA')),
+    curso_actual            varchar(50) CHECK (curso_actual IN ('PRIMERO', 'SEGUNDO', 'TERCERO', 'CUARTO', 'QUINTO', 'SEXTO')),            
+    turno_actual            varchar(50) CHECK (turno_actual IN ('MAÑANA', 'TARDE', 'NOCHE')),
+    
+    -- Solo universitarios
+    carrera                 varchar(100),       
+    anio_ingreso            smallint,
+    
+    -- Auditoría
+    fecha_registro          timestamp DEFAULT now(),
+    id_usuario              bigint,
+    id_usuario_modificacion bigint,
+    version_registro        int DEFAULT 1,
+    estado_registro         boolean DEFAULT true,
+
+    -- Reglas de consistencia
+    CONSTRAINT chk_tipo_colegial 
+        CHECK (
+            (tipo = 'COLEGIAL' AND nivel_actual IS NOT NULL AND curso_actual IS NOT NULL AND turno_actual IS NOT NULL 
+             AND carrera IS NULL AND anio_ingreso IS NULL)
+            OR 
+            (tipo = 'UNIVERSITARIO' AND carrera IS NOT NULL AND anio_ingreso IS NOT NULL
+             AND nivel_actual IS NULL AND curso_actual IS NULL AND turno_actual IS NULL)
+        )
+);
+
+CREATE TABLE persona.persona_tutor (
+    id_tutor                bigserial PRIMARY KEY,
+    id_persona              bigint NOT NULL
+                             REFERENCES persona.persona(id_persona) ON DELETE CASCADE,
+
+    pago_por_hora           numeric(12,2) NOT NULL CHECK (pago_por_hora >= 0),
+    nivel_experiencia       varchar(20)  NOT NULL
+                             CHECK (nivel_experiencia IN ('RECLUTA', 'EXPERIMENTADO', 'SENIOR')),
+
+    -- Especialidad por tipo/nivel
+    tipo_estudiante_especialidad   varchar(20) NOT NULL
+                                   CHECK (tipo_estudiante_especialidad IN ('UNIVERSITARIO','COLEGIAL')),
+    nivel_estudiante_especialidad  varchar(20)
+                                   CHECK (nivel_estudiante_especialidad IN ('PRIMARIA', 'SECUNDARIA')),
+
+    -- Auditoría
+    fecha_registro          timestamp DEFAULT now(),
+    id_usuario              bigint,
+    id_usuario_modificacion bigint,
+    version_registro        int DEFAULT 1,
+    estado_registro         boolean DEFAULT true,
+
+    -- Evita duplicar el rol tutor para la misma persona
+    CONSTRAINT uq_tutor_persona UNIQUE (id_persona),
+
+    -- Regla clave solicitada:
+    -- Si es UNIVERSITARIO => nivel_estudiante_especialidad debe ser NULL
+    -- Si es COLEGIAL      => nivel_estudiante_especialidad debe ser NOT NULL
+    CONSTRAINT chk_tipo_vs_nivel
+      CHECK (
+        (tipo_estudiante_especialidad = 'UNIVERSITARIO' AND nivel_estudiante_especialidad IS NULL)
+        OR
+        (tipo_estudiante_especialidad = 'COLEGIAL' AND nivel_estudiante_especialidad IS NOT NULL)
+      )
+);
+
+-- 2) Catálogo simple de materias (ajústalo si ya tienes uno)
+CREATE TABLE servicios_educativos.materia_tree (
+    id_tree              bigserial PRIMARY KEY,
+    nombre                  varchar(100) NOT NULL UNIQUE,
+    tema                    varchar(100) NOT NULL,  
+    subtema                 varchar(100) NOT NULL,  
+
+    -- Auditoría
+    fecha_registro          timestamp DEFAULT now(),
+    id_usuario              bigint,
+    id_usuario_modificacion bigint,
+    version_registro        int DEFAULT 1,
+    estado_registro         boolean DEFAULT true
+);
+
+-- 1) Asegurar columna fecha_modificacion en todas las tablas
+ALTER TABLE servicios_educativos.producto_educativo         ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE servicios_educativos.curso_version               ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE servicios_educativos.paquetes_producto_educativo ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE persona.unidad_educativa                         ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE persona.persona_estudiante                       ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE persona.tutor                                    ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+ALTER TABLE servicios_educativos.materia_tree                ADD COLUMN IF NOT EXISTS fecha_modificacion timestamp DEFAULT now();
+
+-- 2) Triggers BEFORE UPDATE usando tu función contabilidad.fn_audit_bu_simple()
+
+DROP TRIGGER IF EXISTS trg_bu_producto_educativo_audit ON servicios_educativos.producto_educativo;
+CREATE TRIGGER trg_bu_producto_educativo_audit
+BEFORE UPDATE ON servicios_educativos.producto_educativo
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_curso_version_audit ON servicios_educativos.curso_version;
+CREATE TRIGGER trg_bu_curso_version_audit
+BEFORE UPDATE ON servicios_educativos.curso_version
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_paquetes_prod_educ_audit ON servicios_educativos.paquetes_producto_educativo;
+CREATE TRIGGER trg_bu_paquetes_prod_educ_audit
+BEFORE UPDATE ON servicios_educativos.paquetes_producto_educativo
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_unidad_educativa_audit ON persona.unidad_educativa;
+CREATE TRIGGER trg_bu_unidad_educativa_audit
+BEFORE UPDATE ON persona.unidad_educativa
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_persona_estudiante_audit ON persona.persona_estudiante;
+CREATE TRIGGER trg_bu_persona_estudiante_audit
+BEFORE UPDATE ON persona.persona_estudiante
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_tutor_audit ON persona.tutor;
+CREATE TRIGGER trg_bu_tutor_audit
+BEFORE UPDATE ON persona.persona_tutor
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
+DROP TRIGGER IF EXISTS trg_bu_materia_tree_audit ON servicios_educativos.materia_tree;
+CREATE TRIGGER trg_bu_materia_tree_audit
+BEFORE UPDATE ON servicios_educativos.materia_tree
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
 
 create table servicios_educativos.clase_por_hora(
 	id_clase	bigserial primary key,
 	id_aula	    int not null references infraestructura.espacio(id_espacio),
-	id_estudiante int not null references personas.persona_estudiate(id_estudiante),
+	id_estudiante int not null references persona.persona_estudiante(id_persona),
+	id_tutor	  int not null references persona.persona_tutor(id_tutor),
 	
-	materia		text not null,
-	tema		text not null,
-	subtema		text,
+
+	id_materia_tree int not null references servicios_educativos.materia_tree,
 	
 	hora_llegada timestamp not null,
 	motivo		 text not null check (motivo in ('EXAMEN', 'NIVELACIÓN', 'PRÁCTICO')),
-	modalidad	 text not null default 'PRESENCIAL' check ('PRESENCIAL','VIRTUAL'))
+	modalidad	 text not null default 'PRESENCIAL' check (modalidad in ('PRESENCIAL','VIRTUAL')),
 	
+	estado_registro         varchar(20) DEFAULT 'Activo',
+  	fecha_registro          timestamptz  DEFAULT now(),
+  	fecha_modificacion      timestamptz,
+  	version_registro        int          DEFAULT 1,
+  	id_usuario_creador      bigint,
+  	id_usuario_modificacion bigint
+);
 
-)
+DROP TRIGGER IF EXISTS trg_bu_clase_por_hora_audit ON servicios_educativos.clase_por_hora;
+CREATE TRIGGER trg_bu_clase_por_hora_audit
+BEFORE UPDATE ON servicios_educativos.clase_por_hora
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
+CREATE TABLE servicios_educativos.clase_curso (
+    id_clase_curso        BIGSERIAL PRIMARY KEY,
+
+    -- Vínculos académicos
+    id_curso_version      BIGINT NOT NULL
+                           REFERENCES servicios_educativos.curso_version(id_curso_version) ON DELETE CASCADE,
+    id_horario            BIGINT
+                           REFERENCES servicios_educativos.horario(id_horario) ON DELETE SET NULL,
+
+    -- Recursos
+    id_aula               BIGINT
+                           REFERENCES infraestructura.aula(id_aula) ON DELETE SET NULL,
+    id_tutor   			  BIGINT
+                           REFERENCES administracion.empleado(id_empleado) ON DELETE SET NULL,
+
+    -- Programación real del día
+    fecha                 DATE NOT NULL,
+    hora_inicio_real      TIME NOT NULL,
+    hora_fin_real         TIME NOT NULL CHECK (hora_fin_real > hora_inicio_real),
+
+    -- Estado y metadatos
+    estado                VARCHAR(20) NOT NULL DEFAULT 'Programada'
+                           CHECK (estado IN ('Programada','En curso','Dictada','Reprogramada','Cancelada')),
+    modalidad             VARCHAR(30) DEFAULT 'Presencial'
+                           CHECK (modalidad IN ('Presencial','Online','Híbrido')),
+    detalle_temas_revisados                  VARCHAR(200),
+    observaciones         VARCHAR(300),
+    motivo_cancelacion    VARCHAR(200),
+
+    -- Control de duplicidad: una clase por horario y fecha
+    CONSTRAINT uq_clase_por_horario_fecha UNIQUE (id_horario, fecha),
+
+    -- Auditoría
+    fecha_registro         TIMESTAMP DEFAULT now(),
+    estado_registro        BOOLEAN   DEFAULT TRUE,
+    id_usuario             BIGINT,
+    id_usuario_modificacion BIGINT,
+    version_registro       INT       DEFAULT 1
+);
+
 
 CREATE TABLE IF NOT EXISTS inventario.bien_instancia (
   id_bien_instancia	    bigserial PRIMARY KEY,
@@ -357,6 +563,36 @@ CREATE TABLE inventario.movimiento_detalle (
     id_bien_instancia IS NULL OR cantidad = 1
   )
 );
+
+
+DROP TRIGGER IF EXISTS trg_bu_bien_instancia_audit ON inventario.bien_instancia;
+CREATE TRIGGER trg_bu_bien_instancia_audit
+BEFORE UPDATE ON inventario.bien_instancia
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+-- inventario.bien_lote
+DROP TRIGGER IF EXISTS trg_bu_bien_lote_audit ON inventario.bien_lote;
+CREATE TRIGGER trg_bu_bien_lote_audit
+BEFORE UPDATE ON inventario.bien_lote
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+-- Evitar fechas incoherentes
+ALTER TABLE inventario.bien_instancia
+  ADD CONSTRAINT chk_instancia_fechas
+  CHECK (
+    (fecha_fabricacion IS NULL OR fecha_compra >= fecha_fabricacion) AND
+    (fecha_vencimiento IS NULL OR fecha_vencimiento >= COALESCE(fecha_fabricacion, fecha_compra))
+  );
+
+ALTER TABLE inventario.bien_lote
+  ADD CONSTRAINT chk_lote_fechas
+  CHECK (
+    (fecha_fabricacion IS NULL OR fecha_compra >= fecha_fabricacion) AND
+    (fecha_vencimiento IS NULL OR fecha_vencimiento >= COALESCE(fecha_fabricacion, fecha_compra))
+  );
+
 
 CREATE INDEX IF NOT EXISTS ix_mvdet_mov     ON inventario.movimiento_detalle(id_movimiento);
 CREATE INDEX IF NOT EXISTS ix_mvdet_bien    ON inventario.movimiento_detalle(id_bien);
@@ -734,10 +970,8 @@ FOR EACH ROW EXECUTE FUNCTION infraestructura.fn_guard_tienda();
 
 
 
--- 📌 Tabla principal de deudas
+--  Tabla principal de deudas
 create schema if not exists deuda;
-
-drop table if exists deuda.deuda;
 CREATE TABLE IF NOT EXISTS deuda.deuda (
     id_deuda            BIGSERIAL PRIMARY KEY,
     id_proveedor        BIGINT NOT NULL
@@ -787,7 +1021,45 @@ CREATE TABLE IF NOT EXISTS deuda.pago (
 );
 
 
+ALTER TABLE deuda.deuda
+  ADD COLUMN IF NOT EXISTS fecha_modificacion timestamptz,
+  ADD COLUMN IF NOT EXISTS version_registro   int DEFAULT 1;
 
+ALTER TABLE deuda.pago
+  ADD COLUMN IF NOT EXISTS fecha_modificacion timestamptz,
+  ADD COLUMN IF NOT EXISTS version_registro   int DEFAULT 1;
+
+/* === Reglas de consistencia recomendadas === */
+ALTER TABLE deuda.deuda
+  ADD CONSTRAINT chk_capitalizacion_vs_tipo_tasa
+  CHECK (
+    (tipo_tasa = 'COMPUESTA' AND capitalizacion IS NOT NULL)
+    OR
+    (tipo_tasa = 'SIMPLE'    AND capitalizacion IS NULL)
+  );
+
+/* (Opcional) coherencia de montos en pago: al menos uno > 0 */
+ALTER TABLE deuda.pago
+  ADD CONSTRAINT chk_pago_tiene_movimiento
+  CHECK (
+    (COALESCE(interes_pagado,0)
+    + COALESCE(capital_amortizado,0)
+    + COALESCE(seguro_desgravamen_pagado,0)
+    + COALESCE(otros_recargos_pagados,0)) > 0
+  );
+
+/* === Triggers BEFORE UPDATE con tu función de auditoría === */
+DROP TRIGGER IF EXISTS trg_bu_deuda_audit ON deuda.deuda;
+CREATE TRIGGER trg_bu_deuda_audit
+BEFORE UPDATE ON deuda.deuda
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_bu_pago_audit ON deuda.pago;
+CREATE TRIGGER trg_bu_pago_audit
+BEFORE UPDATE ON deuda.pago
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
 CREATE TABLE IF NOT EXISTS administracion.kpi (
@@ -805,7 +1077,6 @@ CREATE TABLE IF NOT EXISTS administracion.kpi (
   id_usuario_creador  bigint,
   id_usuario_modificacion bigint
 );
-
 
 
 CREATE TABLE IF NOT EXISTS administracion.objetivo_kpi (
