@@ -1,4 +1,72 @@
-drop table contabilidad.cuenta;
+CREATE OR REPLACE FUNCTION contabilidad.fn_audit_bu_simple()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.fecha_modificacion := now();
+  NEW.version_registro   := COALESCE(OLD.version_registro, 1) + 1;
+  RETURN NEW;
+END$$;
+
+-- =========================
+-- PERSONA (padre) y USUARIO (hijo 1:1)
+-- =========================
+CREATE TABLE IF NOT EXISTS persona.persona (
+  id_persona          bigserial PRIMARY KEY,
+  nombres             varchar(100) NOT NULL,
+  apellidos           varchar(100),
+  telefono            varchar(100),
+  fecha_nacimiento    date,
+  email               varchar(200),
+  -- auditoría
+  estado_registro     varchar(20) DEFAULT 'Activo',
+  fecha_registro      timestamptz  DEFAULT now(),
+  fecha_modificacion  timestamptz,
+  version_registro    int          DEFAULT 1,
+  id_usuario_creador  bigint,
+  id_usuario_modificacion bigint
+);
+DROP TRIGGER IF EXISTS bu_persona ON persona.persona;
+CREATE TRIGGER bu_persona
+BEFORE UPDATE ON persona.persona
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+CREATE TABLE IF NOT EXISTS persona.persona_usuario (
+  id_persona          bigint PRIMARY KEY
+                      REFERENCES persona.persona(id_persona) ON DELETE CASCADE,
+  nombre_usuario      varchar(80) UNIQUE NOT NULL,
+  contrasena_hash     varchar(255) NOT NULL,
+  tipo_usuario        varchar(200),
+  -- auditoría
+  estado_registro     varchar(20) DEFAULT 'Activo',
+  fecha_registro      timestamptz  DEFAULT now(),
+  fecha_modificacion  timestamptz,
+  version_registro    int          DEFAULT 1,
+  id_usuario_creador  bigint,
+  id_usuario_modificacion bigint
+);
+DROP TRIGGER IF EXISTS bu_persona_usuario ON persona.persona_usuario;
+CREATE TRIGGER bu_persona_usuario
+BEFORE UPDATE ON persona.persona_usuario
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+CREATE TABLE IF NOT EXISTS persona.proveedor (
+  id_proveedor        bigserial PRIMARY KEY,
+  nombre_proveedor    varchar(180) NOT NULL,
+  categoria           varchar(100),
+  telefono            varchar(100),
+  -- auditoría
+  estado_registro     varchar(20) DEFAULT 'Activo',
+  fecha_registro      timestamptz  DEFAULT now(),
+  fecha_modificacion  timestamptz,
+  version_registro    int          DEFAULT 1,
+  id_usuario_creador  bigint,
+  id_usuario_modificacion bigint
+);
+DROP TRIGGER IF EXISTS bu_proveedor ON persona.proveedor;
+CREATE TRIGGER bu_proveedor
+BEFORE UPDATE ON persona.proveedor
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
 	
 CREATE TABLE IF NOT EXISTS contabilidad.grupo_cuenta (
   id_grupo_cuenta   bigserial PRIMARY KEY,
@@ -439,8 +507,8 @@ FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
 create table servicios_educativos.clase_por_hora(
-	id_clase	bigserial primary key,
-	id_aula	    int not null references infraestructura.espacio(id_espacio),
+	id_clase	  bigserial primary key,
+	id_aula	      int not null references infraestructura.espacio(id_espacio),
 	id_estudiante int not null references persona.persona_estudiante(id_persona),
 	id_tutor	  int not null references persona.persona_tutor(id_tutor),
 	
@@ -465,6 +533,8 @@ BEFORE UPDATE ON servicios_educativos.clase_por_hora
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
+
+
 CREATE TABLE servicios_educativos.clase_curso (
     id_clase_curso        BIGSERIAL PRIMARY KEY,
 
@@ -474,7 +544,7 @@ CREATE TABLE servicios_educativos.clase_curso (
 
     -- Recursos
     id_aula               BIGINT
-                           REFERENCES infraestructura.aula(id_aula) ON DELETE SET NULL,
+                           REFERENCES infraestructura.espacio(id_espacio) ON DELETE SET NULL,
     id_tutor   			  BIGINT
                            REFERENCES administracion.empleado(id_empleado) ON DELETE SET NULL,
 
@@ -492,16 +562,131 @@ CREATE TABLE servicios_educativos.clase_curso (
     observaciones         VARCHAR(300),
     motivo_cancelacion    VARCHAR(200),
 
-    -- Control de duplicidad: una clase por horario y fecha
-    CONSTRAINT uq_clase_por_horario_fecha UNIQUE (id_horario, fecha),
-
     -- Auditoría
     fecha_registro         TIMESTAMP DEFAULT now(),
+    fecha_modificacion 	   timestamptz,
     estado_registro        BOOLEAN   DEFAULT TRUE,
     id_usuario             BIGINT,
     id_usuario_modificacion BIGINT,
     version_registro       INT       DEFAULT 1
 );
+
+DROP TRIGGER IF EXISTS trg_bu_clase_curso_audit ON servicios_educativos.clase_curso;
+CREATE TRIGGER trg_bu_clase_curso_audit
+BEFORE UPDATE ON servicios_educativos.clase_curso
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+-- Función de validación de AULA
+CREATE OR REPLACE FUNCTION servicios_educativos.fn_validar_aula()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_tipo       infraestructura.tipo_espacio;
+  v_categoria  infraestructura.categoria_sala;
+BEGIN
+  -- Si no se está seteando aula (nullable en algunas tablas), no validar
+  IF NEW.id_aula IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT e.tipo, e.categoria_sala
+    INTO v_tipo, v_categoria
+    FROM infraestructura.espacio e
+   WHERE e.id_espacio = NEW.id_aula;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'El id_aula=% no existe en infraestructura.espacio.', NEW.id_aula
+      USING ERRCODE = 'foreign_key_violation';
+  END IF;
+
+  IF v_tipo <> 'SALA'::infraestructura.tipo_espacio THEN
+    RAISE EXCEPTION 'El espacio % no es de tipo SALA (tipo=%).', NEW.id_aula, v_tipo;
+  END IF;
+
+  IF v_categoria <> 'AULA'::infraestructura.categoria_sala THEN
+    RAISE EXCEPTION 'El espacio % no es categoría AULA (categoria=%).', NEW.id_aula, v_categoria;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger en clase_por_hora
+DROP TRIGGER IF EXISTS trg_biud_validar_aula_cph ON servicios_educativos.clase_por_hora;
+CREATE TRIGGER trg_biud_validar_aula_cph
+BEFORE INSERT OR UPDATE OF id_aula ON servicios_educativos.clase_por_hora
+FOR EACH ROW
+EXECUTE FUNCTION servicios_educativos.fn_validar_aula();
+
+-- Trigger en clase_curso
+DROP TRIGGER IF EXISTS trg_biud_validar_aula_cc ON servicios_educativos.clase_curso;
+CREATE TRIGGER trg_biud_validar_aula_cc
+BEFORE INSERT OR UPDATE OF id_aula ON servicios_educativos.clase_curso
+FOR EACH ROW
+EXECUTE FUNCTION servicios_educativos.fn_validar_aula();
+
+
+-- Tabla: asistencia a clase de curso
+CREATE TABLE servicios_educativos.asistencia_clase_curso (
+    id_asistencia              BIGSERIAL PRIMARY KEY,
+
+    -- Vínculos
+    id_clase_curso             BIGINT NOT NULL
+                                REFERENCES servicios_educativos.clase_curso(id_clase_curso) ON DELETE CASCADE,
+    id_estudiante              BIGINT NOT NULL
+                                REFERENCES persona.persona_estudiante(id_persona) ON DELETE RESTRICT,
+
+    -- Datos de control
+    estado_asistencia          VARCHAR(15) NOT NULL
+                                CHECK (estado_asistencia IN ('PRESENTE','AUSENTE','TARDANZA','RETIRADO','JUSTIFICADO')),
+    hora_entrada               TIME,
+    hora_salida                TIME,
+    motivo_justificacion       VARCHAR(250),   -- requerido si JUSTIFICADO
+    observaciones              VARCHAR(300),
+
+    -- Auditoría
+    fecha_registro             TIMESTAMP  DEFAULT now(),
+    fecha_modificacion         timestamptz,
+    estado_registro            BOOLEAN    DEFAULT TRUE,
+    id_usuario                 BIGINT,
+    id_usuario_modificacion    BIGINT,
+    version_registro           INT        DEFAULT 1,
+
+    -- Evitar duplicados: un registro por (clase, estudiante)
+    CONSTRAINT uq_asistencia_clase_estudiante UNIQUE (id_clase_curso, id_estudiante),
+
+    -- Reglas de consistencia:
+    -- 1) Si PRESENTE/TARDANZA/RETIRADO => hora_entrada obligatoria
+    -- 2) Si RETIRADO => hora_salida obligatoria y >= hora_entrada
+    -- 3) Si AUSENTE => sin horas (opcionales, pero si hay salida debe haber entrada)
+    -- 4) Si JUSTIFICADO => motivo_justificacion obligatorio (horas opcionales)
+    CONSTRAINT chk_asistencia_horas_y_motivo CHECK (
+        (estado_asistencia IN ('PRESENTE','TARDANZA') AND hora_entrada IS NOT NULL AND
+            (hora_salida IS NULL OR hora_salida >= hora_entrada))
+        OR
+        (estado_asistencia = 'RETIRADO' AND hora_entrada IS NOT NULL AND hora_salida IS NOT NULL AND hora_salida >= hora_entrada)
+        OR
+        (estado_asistencia = 'AUSENTE' AND
+            (hora_entrada IS NULL OR (hora_entrada IS NOT NULL AND (hora_salida IS NULL OR hora_salida >= hora_entrada))))
+        OR
+        (estado_asistencia = 'JUSTIFICADO' AND motivo_justificacion IS NOT NULL AND
+            (hora_salida IS NULL OR hora_entrada IS NULL OR hora_salida >= hora_entrada))
+    )
+);
+
+-- Índices útiles
+CREATE INDEX idx_asistencia_clase_curso    ON servicios_educativos.asistencia_clase_curso(id_clase_curso);
+CREATE INDEX idx_asistencia_estudiante     ON servicios_educativos.asistencia_clase_curso(id_estudiante);
+CREATE INDEX idx_asistencia_estado         ON servicios_educativos.asistencia_clase_curso(estado_asistencia);
+
+-- Trigger BEFORE UPDATE de auditoría (usa tu función existente)
+DROP TRIGGER IF EXISTS trg_bu_asistencia_clase_curso_audit ON servicios_educativos.asistencia_clase_curso;
+CREATE TRIGGER trg_bu_asistencia_clase_curso_audit
+BEFORE UPDATE ON servicios_educativos.asistencia_clase_curso
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
 CREATE TABLE IF NOT EXISTS inventario.bien_instancia (
