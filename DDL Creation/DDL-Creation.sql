@@ -201,6 +201,7 @@ CREATE TABLE IF NOT EXISTS inventario.bien (
   factor_conversion       			numeric(18,6) DEFAULT 1 CHECK (factor_conversion > 0),
   controla_inventario_loteable     	boolean NOT NULL DEFAULT false,        -- false para SERVICIO, por ej.
   controla_inventario_no_loteable	boolean not null default false,
+  es_producto_tienda 				boolean default false,
 
   -- Valuación y precios de referencia
   metodo_valuacion        inventario.metodo_valuacion DEFAULT 'PROM',
@@ -428,12 +429,8 @@ CREATE TABLE persona.persona_tutor (
     version_registro        int DEFAULT 1,
     estado_registro         boolean DEFAULT true,
 
-    -- Evita duplicar el rol tutor para la misma persona
     CONSTRAINT uq_tutor_persona UNIQUE (id_persona),
 
-    -- Regla clave solicitada:
-    -- Si es UNIVERSITARIO => nivel_estudiante_especialidad debe ser NULL
-    -- Si es COLEGIAL      => nivel_estudiante_especialidad debe ser NOT NULL
     CONSTRAINT chk_tipo_vs_nivel
       CHECK (
         (tipo_estudiante_especialidad = 'UNIVERSITARIO' AND nivel_estudiante_especialidad IS NULL)
@@ -533,8 +530,6 @@ BEFORE UPDATE ON servicios_educativos.clase_por_hora
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
-
-
 CREATE TABLE servicios_educativos.clase_curso (
     id_clase_curso        BIGSERIAL PRIMARY KEY,
 
@@ -546,7 +541,7 @@ CREATE TABLE servicios_educativos.clase_curso (
     id_aula               BIGINT
                            REFERENCES infraestructura.espacio(id_espacio) ON DELETE SET NULL,
     id_tutor   			  BIGINT
-                           REFERENCES administracion.empleado(id_empleado) ON DELETE SET NULL,
+                           REFERENCES persona.persona_tutor (id_tutor) ON DELETE SET NULL,
 
     -- Programación real del día
     fecha                 DATE NOT NULL,
@@ -570,6 +565,7 @@ CREATE TABLE servicios_educativos.clase_curso (
     id_usuario_modificacion BIGINT,
     version_registro       INT       DEFAULT 1
 );
+
 
 DROP TRIGGER IF EXISTS trg_bu_clase_curso_audit ON servicios_educativos.clase_curso;
 CREATE TRIGGER trg_bu_clase_curso_audit
@@ -900,7 +896,6 @@ FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 CREATE INDEX IF NOT EXISTS idx_empleado_sucursal ON administracion.empleado(id_sucursal);
 
 
-
 create table if not exists administracion.empleado_posicion_pago(
 	id_empleado_posicion	bigserial primary key,
 	id_empleado				bigint NOT NULL REFERENCES administracion.empleado(id_empleado) ON DELETE CASCADE,
@@ -945,6 +940,35 @@ BEFORE UPDATE ON administracion.empleado_posicion_pago
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
+
+create table if not exists administracion.empleado_registro_pago(
+	id_pago 		bigserial primary key,
+	fecha_pago		date not null,
+	
+	--Pagos
+	haber_basico_pagado   		float8 not null default 0,
+	comisiones_totales_pagadas 	float8 not null default 0,
+	aguinaldos_totales_pagados  float8 not null default 0,
+	indemnizacion_total_pagada  float8 not null default 0,
+	otros_cargos_pagados        float8 not null default 0,
+	descripcion_otros_cargos_pagados text,
+	
+	-- Notas
+	notas_pago					text,
+		
+	-- Auditoria
+	estado_registro       varchar(20) DEFAULT 'Activo',
+	fecha_registro        timestamptz  DEFAULT now(),
+	fecha_modificacion    timestamptz,
+	version_registro      int          DEFAULT 1,
+	id_usuario_creador    bigint,
+	id_usuario_modificacion bigint
+);
+
+DROP TRIGGER IF EXISTS trg_bu_empleado_registro_pago_audit ON administracion.empleado_registro_pago;
+CREATE TRIGGER trg_bu_empleado_registro_pago_audit
+BEFORE UPDATE ON administracion.empleado_registro_pago
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 CREATE SCHEMA IF NOT EXISTS infraestructura;
 
@@ -1287,7 +1311,6 @@ CREATE TABLE IF NOT EXISTS administracion.kpi (
   id_usuario_modificacion bigint
 );
 
-
 CREATE TABLE IF NOT EXISTS administracion.objetivo_kpi (
   id_objetivo_kpi     bigserial PRIMARY KEY,
   id_kpi              bigint NOT NULL
@@ -1299,8 +1322,10 @@ CREATE TABLE IF NOT EXISTS administracion.objetivo_kpi (
   valor_maximo        numeric(18,4),
   
   responsable		  int references administracion.empleado(id_empleado),
+  id_sucursal		  int references infraestructura.sucursal(id_sucursal),
   id_tienda 		  int references infraestructura.tienda(id_tienda),
-  id_producto		  int references 
+  id_producto		  int references servicios_educativos.producto_educativo(id_producto_educativo),  
+  id_producto_tienda  int references inventario.bien(id_bien),
   
   -- Estado de cumplimiento / tracking
   cumplido            boolean DEFAULT false,
@@ -1313,3 +1338,170 @@ CREATE TABLE IF NOT EXISTS administracion.objetivo_kpi (
   id_usuario_creador  bigint,
   id_usuario_modificacion bigint
 );
+
+CREATE OR REPLACE FUNCTION inventario.check_es_producto_tienda()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_es_producto_tienda boolean;
+BEGIN
+    SELECT b.es_producto_tienda
+      INTO v_es_producto_tienda
+      FROM inventario.bien b
+     WHERE b.id_bien = NEW.id_bien;
+
+    IF v_es_producto_tienda THEN
+        RETURN NEW;
+    ELSE
+        RAISE EXCEPTION 'El bien % no es producto de tienda', NEW.id_bien
+            USING ERRCODE = 'check_violation';
+    END IF;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_kpi_audit ON administracion.kpi;
+CREATE TRIGGER trg_kpi_audit
+BEFORE UPDATE ON administracion.kpi
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_objetivo_kpi_audit ON administracion.objetivo_kpi;
+CREATE TRIGGER trg_objetivo_kpi_audit
+BEFORE UPDATE ON administracion.objetivo_kpi
+FOR EACH ROW
+EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+DROP TRIGGER IF EXISTS trg_objetivo_kpi_check_es_producto_tienda ON administracion.objetivo_kpi;
+create  TRIGGER trg_objetivo_kpi_check_es_producto_tienda
+BEFORE UPDATE ON administracion.objetivo_kpi
+FOR EACH ROW
+EXECUTE FUNCTION inventario.check_es_producto_tienda();
+
+
+-- ==========================================================
+-- Centro de Costos -> asociación a: DEUDA, BIEN, SUCURSAL, TIENDA, EMPLEADO, POSICION
+-- ==========================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='tipo_costo') THEN
+    CREATE TYPE contabilidad.tipo_costo AS ENUM ('DIRECTO','INDIRECTO');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname='naturaleza_costo') THEN
+    CREATE TYPE contabilidad.naturaleza_costo AS ENUM ('FIJO','VARIABLE');
+  END IF;
+END$$;
+
+
+CREATE TABLE IF NOT EXISTS contabilidad.centro_costo_mapa (
+  id_cc_mapa            bigserial PRIMARY KEY,
+  id_centro_costo       bigint NOT NULL REFERENCES contabilidad.centro_costo(id_centro_costo),
+
+  -- Clasificacion y naturaleza
+  tipo             contabilidad.tipo_costo NOT NULL,
+  naturaleza       contabilidad.naturaleza_costo NOT NULL,
+      
+  -- Vigencias
+  vigente_desde         date NOT NULL DEFAULT CURRENT_DATE,
+  vigente_hasta         date,
+  CONSTRAINT ck_ccm_periodo CHECK (vigente_hasta IS NULL OR vigente_hasta >= vigente_desde),
+
+  -- Destinos posibles (exactamente UNO)
+  id_deuda              bigint REFERENCES deuda.deuda(id_deuda),
+  id_bien               bigint REFERENCES inventario.bien(id_bien),
+  id_sucursal           bigint REFERENCES infraestructura.sucursal(id_sucursal),
+  id_tienda             bigint REFERENCES infraestructura.tienda(id_tienda),
+  id_empleado           bigint REFERENCES administracion.empleado(id_empleado),
+  id_posicion           bigint REFERENCES administracion.posicion(id_posicion),
+
+  CONSTRAINT ck_ccm_un_solo_destino CHECK (
+    num_nonnulls(id_deuda, id_bien, id_sucursal, id_tienda, id_empleado, id_posicion) = 1
+  ),
+
+  -- Auditoría
+  estado_registro       varchar(20) DEFAULT 'Activo',
+  fecha_registro        timestamptz  DEFAULT now(),
+  fecha_modificacion    timestamptz,
+  version_registro      int          DEFAULT 1,
+  id_usuario_creador    bigint,
+  id_usuario_modificacion bigint
+);
+
+-- Índices parciales
+CREATE INDEX IF NOT EXISTS ix_ccm_deuda    ON contabilidad.centro_costo_mapa(id_deuda)    WHERE id_deuda    IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_ccm_bien     ON contabilidad.centro_costo_mapa(id_bien)     WHERE id_bien     IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_ccm_sucursal ON contabilidad.centro_costo_mapa(id_sucursal) WHERE id_sucursal IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_ccm_tienda   ON contabilidad.centro_costo_mapa(id_tienda)   WHERE id_tienda   IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_ccm_empleado ON contabilidad.centro_costo_mapa(id_empleado) WHERE id_empleado IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_ccm_posicion ON contabilidad.centro_costo_mapa(id_posicion) WHERE id_posicion IS NOT NULL;
+
+DROP TRIGGER IF EXISTS bu_ccm ON contabilidad.centro_costo_mapa;
+CREATE TRIGGER bu_ccm
+BEFORE UPDATE ON contabilidad.centro_costo_mapa
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
+
+
+
+CREATE TABLE IF NOT EXISTS contabilidad.transaccion (
+  id_transaccion        bigserial PRIMARY KEY,
+  fecha_transaccion     timestamptz NOT NULL DEFAULT now(),
+  tipo_transaccion      contabilidad.tipo_transaccion NOT NULL,
+  descripcion           varchar(300),
+  referencia_externa    varchar(120),
+
+  -- Monto/moneda (cuando aplique). Para inventario puede ser NULL (ej. traslado).
+  monto_total           numeric(18,2),
+  moneda                varchar(3) DEFAULT 'BOB',
+
+  -- Centro de costos (se resuelve por trigger si es NULL)
+  id_centro_costo_mapa   bigint REFERENCES contabilidad.centro_costo_mapa(id_centro_costo_mapa),
+
+  -- Enlaces (opcionales, validados por tipo)
+  -- Inventario
+  id_bien				bigint references inventario.bien(id_bien),
+  id_movimiento_detalle bigint REFERENCES inventario.movimiento_detalle(id_movimiento),
+
+  -- Deuda
+  id_deuda              bigint REFERENCES deuda.deuda(id_deuda),
+  id_pago_deuda         bigint REFERENCES deuda.pago(id_pago),
+
+  -- Empleados / Nómina
+  id_empleado            bigint REFERENCES administracion.empleado(id_empleado),
+  empleado_pago bigint   bigint references administracion.empleado_registro_pago(id_pago),
+
+  -- Ventas
+  id_clase_por_hora		bigint references servicios_educativos.clase_por_hora(),
+  id_estudiante         bigint REFERENCES persona.persona_estudiante(id_persona),
+
+  -- Infraestructura / Comercial
+  id_sucursal           bigint REFERENCES infraestructura.sucursal(id_sucursal),
+  id_tienda             bigint REFERENCES infraestructura.tienda(id_tienda),
+
+  -- Proveedor / Compras
+  id_proveedor          bigint REFERENCES persona.proveedor(id_proveedor),
+
+  -- Auditoría
+  estado_registro       varchar(20) DEFAULT 'Activo',
+  fecha_registro        timestamptz  DEFAULT now(),
+  fecha_modificacion    timestamptz,
+  version_registro      int          DEFAULT 1,
+  id_usuario_creador    bigint,
+  id_usuario_modificacion bigint
+);
+
+CREATE INDEX IF NOT EXISTS ix_transaccion_tipo_fecha  ON contabilidad.transaccion(tipo_transaccion, fecha_transaccion);
+CREATE INDEX IF NOT EXISTS ix_transaccion_ccosto      ON contabilidad.transaccion(id_centro_costo);
+CREATE INDEX IF NOT EXISTS ix_transaccion_mov         ON contabilidad.transaccion(id_movimiento_detalle);
+CREATE INDEX IF NOT EXISTS ix_transaccion_pago_deuda  ON contabilidad.transaccion(id_pago_deuda);
+CREATE INDEX IF NOT EXISTS ix_transaccion_clase       ON contabilidad.transaccion(id_clase_curso);
+CREATE INDEX IF NOT EXISTS ix_transaccion_empleado    ON contabilidad.transaccion(id_empleado);
+CREATE INDEX IF NOT EXISTS ix_transaccion_tienda      ON contabilidad.transaccion(id_tienda);
+CREATE INDEX IF NOT EXISTS ix_transaccion_sucursal    ON contabilidad.transaccion(id_sucursal);
+
+DROP TRIGGER IF EXISTS bu_transaccion ON contabilidad.transaccion;
+CREATE TRIGGER bu_transaccion
+BEFORE UPDATE ON contabilidad.transaccion
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+

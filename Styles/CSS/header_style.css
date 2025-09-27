@@ -1,0 +1,35 @@
+header{
+  top: 0; left: 0; right: 0;
+  margin: 0;
+  width: 100%;
+  height: 3.5rem;
+  background-color: #012b64;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+}
+
+header > ul{
+  display: flex;
+  width: 100%;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+  gap: .5rem;                 
+  margin: 0 1rem;      
+  padding: 0;
+}
+
+header > ul > li{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: .15rem;
+}
+header > ul > li > img{
+  max-height: 100%;
+  height: 2rem;               
+  width: auto;
+  display: block;
+}

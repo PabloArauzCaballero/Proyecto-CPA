@@ -1,0 +1,23 @@
+body{
+    background-color: #012b64;
+}
+
+fieldset{
+    padding: 0.5rem;
+    border: none;
+}
+
+legend {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-bottom: 1rem;
+}
+
+div#login_container {
+    width: 25%;
+    border: 2px solid #ccc;    
+    border-radius: 10px;       
+    padding: 20px;             
+    background-color: #f9f9f9;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); 
+}

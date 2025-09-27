@@ -1,0 +1,22 @@
+label {
+    display: block;
+    margin-bottom: 1rem;    
+}
+
+button{
+    padding: 10px 15px;        
+    background-color: #012b64; 
+    color: white;              
+    border: none;             
+    border-radius: 5px;       
+    cursor: pointer;          
+    font-weight: bold;
+}
+
+input[type="text"], input[type="password"], input[type = "date"], select, textarea {
+    width: 100%;               
+    padding: 10px;            
+    border: 1px solid #ccc;   
+    border-radius: 5px;       
+    margin-bottom: 1.5rem;
+}
