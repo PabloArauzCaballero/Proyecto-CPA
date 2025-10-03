@@ -970,6 +970,51 @@ CREATE TRIGGER trg_bu_empleado_registro_pago_audit
 BEFORE UPDATE ON administracion.empleado_registro_pago
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
+CREATE TABLE IF NOT EXISTS administracion.departamento (
+  id_departamento          bigserial PRIMARY KEY,
+
+  -- Identificación
+  codigo                   varchar(30)  NOT NULL,                 -- ej. "FIN", "ACAD-ALGB"
+  nombre                   varchar(120) NOT NULL,
+  descripcion_funciones    varchar(240),
+
+  -- Jerarquía y vínculos
+  id_departamento_padre    bigint
+                            REFERENCES administracion.departamento(id_departamento)
+                            ON DELETE SET NULL,
+  id_sucursal              bigint
+                            REFERENCES infraestructura.sucursal(id_sucursal)
+                            ON DELETE SET NULL,
+  id_jefe_empleado         bigint
+                            REFERENCES administracion.empleado(id_empleado)
+                            ON DELETE SET NULL,
+
+  -- Vigencia / estado funcional
+  es_activo                boolean      NOT NULL DEFAULT true,
+  fecha_inicio             date,
+  fecha_fin                date,
+  CONSTRAINT ck_dep_vigencia CHECK (fecha_fin IS NULL OR fecha_fin >= fecha_inicio),
+
+  -- Unicidades útiles
+  CONSTRAINT uq_dep_codigo UNIQUE (codigo),
+  CONSTRAINT uq_dep_sucursal_nombre UNIQUE (id_sucursal, nombre),
+
+  -- Auditoría
+  estado_registro          varchar(20)  DEFAULT 'Activo',
+  fecha_registro           timestamptz  DEFAULT now(),
+  fecha_modificacion       timestamptz,
+  version_registro         int          DEFAULT 1,
+  id_usuario_creador       bigint,
+  id_usuario_modificacion  bigint
+);
+
+-- Índices recomendados
+CREATE INDEX IF NOT EXISTS ix_dep_padre     ON administracion.departamento(id_departamento_padre);
+CREATE INDEX IF NOT EXISTS ix_dep_sucursal  ON administracion.departamento(id_sucursal);
+CREATE INDEX IF NOT EXISTS ix_dep_jefe      ON administracion.departamento(id_jefe_empleado);
+CREATE INDEX IF NOT EXISTS ix_dep_activo    ON administracion.departamento(es_activo) WHERE es_activo;
+
+
 CREATE SCHEMA IF NOT EXISTS infraestructura;
 
 -- =========================
@@ -1413,7 +1458,9 @@ CREATE TABLE IF NOT EXISTS contabilidad.centro_costo_mapa (
   id_tienda             bigint REFERENCES infraestructura.tienda(id_tienda),
   id_empleado           bigint REFERENCES administracion.empleado(id_empleado),
   id_posicion           bigint REFERENCES administracion.posicion(id_posicion),
-
+  id_departamento       bigint references administracion.departamento (id_departamento),
+  
+  
   CONSTRAINT ck_ccm_un_solo_destino CHECK (
     num_nonnulls(id_deuda, id_bien, id_sucursal, id_tienda, id_empleado, id_posicion) = 1
   ),
@@ -1441,22 +1488,194 @@ BEFORE UPDATE ON contabilidad.centro_costo_mapa
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
 
+create schema if not exists societario;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tipo_titulo_societario') THEN
+    CREATE TYPE societario.tipo_titulo_societario AS ENUM
+      ('ACCION', 'CUOTA', 'PARTICIPACION', 'BONO_CONVERTIBLE', 'SAFE', 'WARRANT', 'OPCION');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tipo_ronda') THEN
+    CREATE TYPE societario.tipo_ronda AS ENUM
+      ('FOUNDERS','ANGEL','SEED','A','B','C','D','PUENTE','OTRA');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'instrumento_emision') THEN
+    CREATE TYPE societario.instrumento_emision AS ENUM
+      ('AUMENTO_CAPITAL','CONVERSION','PLAN_OPCIONES','EMISION_SECUNDARIA','OTRO');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tipo_origen_tenencia') THEN
+    CREATE TYPE societario.tipo_origen_tenencia AS ENUM
+      ('EMISION','TRANSFERENCIA','CONVERSION','EJERCICIO_OPCION','AJUSTE');
+  END IF;
+
+END$$;
+
+
+CREATE TABLE IF NOT EXISTS societario.clase_titulo (
+  id_clase_titulo        bigserial PRIMARY KEY,
+  tipo                   societario.tipo_titulo_societario NOT NULL DEFAULT 'ACCION',
+  sub_tipo				 varchar(60) NOT NULL,         -- p.ej., 'Clase A', 'Ordinaria', 'Preferida'
+  descripcion            text,
+  valor_nominal          numeric(18,6) CHECK (valor_nominal IS NULL OR valor_nominal >= 0),
+  derechos_voto_por_titulo numeric(18,6) DEFAULT 1.0 CHECK (derechos_voto_por_titulo >= 0),
+  prioridad_dividendo_bp integer,                      -- basis points de preferencia (si aplica)
+  pref_liquidacion_x     numeric(18,6),                -- múltiplo de preferencia de liquidación
+  es_convertible         boolean DEFAULT false,        -- si la clase per se es convertible
+  es_participante        boolean DEFAULT false,        -- preferida participante (si aplica)
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  UNIQUE (tipo, sub_tipo)
+);
+
+
+CREATE TABLE IF NOT EXISTS societario.emision_titulo (
+  id_emision             bigserial PRIMARY KEY,
+  id_clase_titulo        bigint NOT NULL
+                         REFERENCES societario.clase_titulo(id_clase_titulo) ON DELETE CASCADE,
+  ronda                  societario.tipo_ronda DEFAULT 'OTRA',
+  instrumento            societario.instrumento_emision NOT NULL DEFAULT 'AUMENTO_CAPITAL',
+  serie                  varchar(30),
+  fecha_emision          date NOT NULL,
+  cantidad_autorizada    numeric(28,6) NOT NULL CHECK (cantidad_autorizada > 0),
+  cantidad_emitida       numeric(28,6) NOT NULL CHECK (cantidad_emitida >= 0),
+  precio_emision         numeric(18,6) CHECK (precio_emision IS NULL OR precio_emision >= 0),
+  observaciones          text,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  CHECK (cantidad_emitida <= cantidad_autorizada)
+);
+
+
+CREATE TABLE IF NOT EXISTS societario.titular (
+  id_titular             bigserial PRIMARY KEY,
+  id_persona             bigint NOT NULL
+                         REFERENCES persona.persona(id_persona) ON DELETE RESTRICT,
+  es_beneficial_owner    boolean DEFAULT true, -- Beneficial vs nominee/custodio
+  observaciones          text,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  UNIQUE (id_persona)
+);
+
+CREATE TABLE IF NOT EXISTS societario.tenencia (
+  id_tenencia            bigserial PRIMARY KEY,
+  id_emision             bigint NOT NULL
+                         REFERENCES societario.emision_titulo(id_emision) ON DELETE CASCADE,
+  id_titular             bigint NOT NULL
+                         REFERENCES societario.titular(id_titular) ON DELETE RESTRICT,
+  cantidad               numeric(28,6) NOT NULL CHECK (cantidad >= 0),
+  fecha_adquisicion      date NOT NULL,
+  origen                 societario.tipo_origen_tenencia NOT NULL DEFAULT 'EMISION',
+  es_nominativa          boolean DEFAULT true, -- vs. al portador (si aplica legalmente)
+  observaciones          text,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  UNIQUE (id_emision, id_titular) DEFERRABLE INITIALLY IMMEDIATE
+);
+
+CREATE TABLE IF NOT EXISTS societario.transferencia_titulo (
+  id_transferencia       bigserial PRIMARY KEY,
+  id_emision             bigint NOT NULL
+                         REFERENCES societario.emision_titulo(id_emision) ON DELETE CASCADE,
+  id_titular_origen      bigint NOT NULL
+                         REFERENCES societario.titular(id_titular) ON DELETE RESTRICT,
+  id_titular_destino     bigint NOT NULL
+                         REFERENCES societario.titular(id_titular) ON DELETE RESTRICT,
+  cantidad               numeric(28,6) NOT NULL CHECK (cantidad > 0),
+  precio_unitario        numeric(18,6) CHECK (precio_unitario IS NULL OR precio_unitario >= 0),
+  fecha_transferencia    date NOT NULL,
+  motivo                 text,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  CHECK (id_titular_origen <> id_titular_destino)
+);
+
+CREATE TABLE IF NOT EXISTS societario.dividendo (
+  id_dividendo           bigserial PRIMARY KEY,
+  id_clase_titulo        bigint NOT NULL REFERENCES societario.clase_titulo(id_clase_titulo) ON DELETE RESTRICT,
+  fecha_declaracion      date NOT NULL,
+  fecha_pago             date,
+  monto_total            numeric(18,6) NOT NULL CHECK (monto_total >= 0),
+  observaciones          text,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint
+);
+
+CREATE TABLE IF NOT EXISTS societario.dividendo_pago (
+  id_dividendo_pago      bigserial PRIMARY KEY,
+  id_dividendo           bigint NOT NULL REFERENCES societario.dividendo(id_dividendo) ON DELETE CASCADE,
+  id_titular             bigint NOT NULL REFERENCES societario.titular(id_titular) ON DELETE RESTRICT,
+  monto_pagado           numeric(18,6) NOT NULL CHECK (monto_pagado >= 0),
+  fecha_pago_real        date,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  UNIQUE (id_dividendo, id_titular)
+);
 
 
 CREATE TABLE IF NOT EXISTS contabilidad.transaccion (
   id_transaccion        bigserial PRIMARY KEY,
-  fecha_transaccion     timestamptz NOT NULL DEFAULT now(),
-  tipo_transaccion      contabilidad.tipo_transaccion NOT NULL,
-  descripcion           varchar(300),
-  referencia_externa    varchar(120),
 
-  -- Monto/moneda (cuando aplique). Para inventario puede ser NULL (ej. traslado).
-  monto_total           numeric(18,2),
-  moneda                varchar(3) DEFAULT 'BOB',
+  fecha_transaccion     date NOT NULL DEFAULT now(),
+  
+  tipo_transaccion      contabilidad.tipo_transaccion NOT NULL,
+  sub_tipo_transaccion	text, 
+  glosa 				varchar(300),
 
   -- Centro de costos (se resuelve por trigger si es NULL)
-  id_centro_costo_mapa   bigint REFERENCES contabilidad.centro_costo_mapa(id_centro_costo_mapa),
+  id_centro_costo_mapa   bigint REFERENCES contabilidad.centro_costo_mapa(id_cc_mapa),
 
   -- Enlaces (opcionales, validados por tipo)
   -- Inventario
@@ -1469,11 +1688,15 @@ CREATE TABLE IF NOT EXISTS contabilidad.transaccion (
 
   -- Empleados / Nómina
   id_empleado            bigint REFERENCES administracion.empleado(id_empleado),
-  empleado_pago bigint   bigint references administracion.empleado_registro_pago(id_pago),
+  id_empleado_pago       bigint references administracion.empleado_registro_pago(id_pago),
+  id_departamento       bigint references administracion.departamento (id_departamento),
+
 
   -- Ventas
-  id_clase_por_hora		bigint references servicios_educativos.clase_por_hora(),
-  id_estudiante         bigint REFERENCES persona.persona_estudiante(id_persona),
+  id_cliente 			bigint references persona.persona (id_persona),
+  id_clase_por_hora		bigint references servicios_educativos.clase_por_hora(id_clase),
+  id_producto_educativo bigint references servicios_educativos.producto_educativo(id_producto_educativo),
+  id_curso_version      bigint references servicios_educativos.curso_version(id_curso_version),
 
   -- Infraestructura / Comercial
   id_sucursal           bigint REFERENCES infraestructura.sucursal(id_sucursal),
@@ -1481,7 +1704,11 @@ CREATE TABLE IF NOT EXISTS contabilidad.transaccion (
 
   -- Proveedor / Compras
   id_proveedor          bigint REFERENCES persona.proveedor(id_proveedor),
-
+  	
+  -- Societario
+  id_dividendo_pago		bigint references societario.dividendo_pago(id_dividendo_pago),
+  id_emision_titulo		bigint references societario.emision_titulo(id_emision),
+  
   -- Auditoría
   estado_registro       varchar(20) DEFAULT 'Activo',
   fecha_registro        timestamptz  DEFAULT now(),
@@ -1492,10 +1719,9 @@ CREATE TABLE IF NOT EXISTS contabilidad.transaccion (
 );
 
 CREATE INDEX IF NOT EXISTS ix_transaccion_tipo_fecha  ON contabilidad.transaccion(tipo_transaccion, fecha_transaccion);
-CREATE INDEX IF NOT EXISTS ix_transaccion_ccosto      ON contabilidad.transaccion(id_centro_costo);
+CREATE INDEX IF NOT EXISTS ix_transaccion_ccosto      ON contabilidad.transaccion(id_centro_costo_mapa);
 CREATE INDEX IF NOT EXISTS ix_transaccion_mov         ON contabilidad.transaccion(id_movimiento_detalle);
 CREATE INDEX IF NOT EXISTS ix_transaccion_pago_deuda  ON contabilidad.transaccion(id_pago_deuda);
-CREATE INDEX IF NOT EXISTS ix_transaccion_clase       ON contabilidad.transaccion(id_clase_curso);
 CREATE INDEX IF NOT EXISTS ix_transaccion_empleado    ON contabilidad.transaccion(id_empleado);
 CREATE INDEX IF NOT EXISTS ix_transaccion_tienda      ON contabilidad.transaccion(id_tienda);
 CREATE INDEX IF NOT EXISTS ix_transaccion_sucursal    ON contabilidad.transaccion(id_sucursal);
@@ -1505,3 +1731,489 @@ CREATE TRIGGER bu_transaccion
 BEFORE UPDATE ON contabilidad.transaccion
 FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
 
+
+CREATE TABLE IF NOT EXISTS contabilidad.cuenta_asignacion (
+  id_cuenta_asignacion  bigserial PRIMARY KEY,
+  entidad_tipo          text NOT NULL,
+
+  id_empleado			bigint references administracion.empleado(id_empleado),
+  
+  id_persona_estudiante bigint references persona.persona_estudiante(id_persona),
+  id_persona_tutor 		bigint references persona.persona_tutor(id_tutor),
+  
+ 
+  id_sucursal           bigint REFERENCES infraestructura.sucursal(id_sucursal),
+  id_edificio		    bigint REFERENCES infraestructura.edificio(id_edificio),
+  id_tienda             bigint REFERENCES infraestructura.tienda(id_tienda),
+  id_bien				bigint references inventario.bien(id_bien),
+  id_deuda              bigint REFERENCES deuda.deuda(id_deuda),
+  id_proveedor          bigint REFERENCES persona.proveedor(id_proveedor),  
+  id_departamento       bigint references administracion.departamento (id_departamento),
+
+  
+  id_cuenta              bigint NOT NULL REFERENCES contabilidad.cuenta(id_cuenta),
+  prioridad              smallint NOT NULL DEFAULT 1,  -- para “fallbacks”/preferencias
+
+  vigente_desde          date NOT NULL DEFAULT CURRENT_DATE,
+  vigente_hasta          date,
+
+  -- Auditoría
+  estado_registro        varchar(20) DEFAULT 'Activo',
+  fecha_registro         timestamptz  DEFAULT now(),
+  fecha_modificacion     timestamptz,
+  version_registro       int          DEFAULT 1,
+  id_usuario_creador     bigint,
+  id_usuario_modificacion bigint,
+
+  CONSTRAINT ck_cta_asig_periodo CHECK (vigente_hasta IS NULL OR vigente_hasta >= vigente_desde)
+);
+
+DROP TRIGGER IF EXISTS bu_cuenta_asignacion ON contabilidad.cuenta_asignacion;
+CREATE TRIGGER bu_cuenta_asignacion
+BEFORE UPDATE ON contabilidad.cuenta_asignacion
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+create table if not exists contabilidad.archivos_transaccion(
+	id_archivo bigserial primary key,
+	id_transaccion int not null references contabilidad.transaccion(id_transaccion),
+	link_achivo text not null,
+	
+
+	 estado_registro        varchar(20) DEFAULT 'Activo',
+	 fecha_registro         timestamptz  DEFAULT now(),
+	 fecha_modificacion     timestamptz,
+	 version_registro       int          DEFAULT 1,
+	 id_usuario_creador     bigint,
+	 id_usuario_modificacion bigint
+);
+
+
+DROP TRIGGER IF EXISTS bu_archivos_transaccion ON contabilidad.archivos_transaccion;
+CREATE TRIGGER bu_archivos_transaccion 
+BEFORE UPDATE ON contabilidad.archivos_transaccion 
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+
+create table if not exists contabilidad.transaccion_movimiento_cuenta(
+	id_movimiento bigserial primary key,
+	id_transaccion int not null references contabilidad.transaccion(id_transaccion),
+	id_cuenta int not null references contabilidad.cuenta(id_cuenta),
+	debe float8 not null default 0,
+	haber float8 not null default 0,
+	
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint	
+);
+
+DROP TRIGGER IF EXISTS bu_transaccion_movimiento_cuenta ON contabilidad.transaccion_movimiento_cuenta ;
+CREATE TRIGGER bu_transaccion_movimiento_cuenta 
+BEFORE UPDATE ON contabilidad.transaccion_movimiento_cuenta 
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+create table if not exists persona.estudiante_padre(
+	id_asociacion bigserial primary key,
+	id_padre int references persona.persona (id_persona),
+	id_estudiante int references persona.persona_estudiante(id_persona),
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint	
+);
+
+DROP TRIGGER IF EXISTS bu_estudiante_padre ON persona.estudiante_padre;
+CREATE TRIGGER bu_estudiante_padre 
+BEFORE UPDATE ON persona.estudiante_padre
+FOR EACH ROW EXECUTE FUNCTION contabilidad.fn_audit_bu_simple();
+
+CREATE OR REPLACE FUNCTION persona.registrar_persona_estudiante(
+    p_id_persona              bigint,
+    p_nombres                 varchar(100),
+    p_apellidos               varchar(100),
+    p_telefono                varchar(100),
+    p_fecha_nacimiento        date,
+    p_email                   varchar(200),
+
+    p_codigo_estudiante       varchar(50),
+    p_id_unidad_educativa     int,
+    p_tipo                    varchar(50),  -- 'UNIVERSITARIO' o 'COLEGIAL'
+    p_nivel_actual            varchar(50), -- PRIMARIA/SECUNDARIA (solo COLEGIAL)
+    p_curso_actual            varchar(50), -- PRIMERO..SEXTO (solo COLEGIAL)
+    p_turno_actual            varchar(50), -- MAÑANA/TARDE/NOCHE (solo COLEGIAL)
+    p_carrera                 varchar(100), -- solo UNIVERSITARIO
+    p_anio_ingreso            smallint ,     -- solo UNIVERSITARIO
+
+    -- Auditoría
+    p_id_usuario              bigint
+)
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_id_persona    bigint;
+    v_codigo        varchar(50);
+    v_exists        boolean;
+BEGIN
+    -- 0) Si se pasa id_persona, validar que exista
+    IF p_id_persona IS NOT NULL THEN
+        SELECT TRUE
+        INTO v_exists
+        FROM persona.persona
+        WHERE id_persona = p_id_persona;
+
+        IF NOT v_exists THEN
+            RAISE EXCEPTION 'No existe persona.id_persona=%', p_id_persona;
+        END IF;
+
+        v_id_persona := p_id_persona;
+    ELSE
+        -- 1) Crear persona base
+        INSERT INTO persona.persona(
+            nombres, apellidos, telefono, fecha_nacimiento, email,
+            estado_registro, fecha_registro, version_registro,
+            id_usuario_creador
+        )
+        VALUES (
+            p_nombres, p_apellidos, p_telefono, p_fecha_nacimiento, p_email,
+            'Activo', now(), 1,
+            p_id_usuario
+        )
+        RETURNING id_persona INTO v_id_persona;
+    END IF;
+
+    -- 2) Evitar duplicidad en persona_estudiante
+    IF EXISTS (SELECT 1 FROM persona.persona_estudiante e WHERE e.id_persona = v_id_persona) THEN
+        RAISE EXCEPTION 'La persona % ya está registrada como ESTUDIANTE', v_id_persona;
+    END IF;
+
+    -- 3) Validaciones por tipo
+    IF p_tipo NOT IN ('UNIVERSITARIO','COLEGIAL') THEN
+        RAISE EXCEPTION 'p_tipo debe ser UNIVERSITARIO o COLEGIAL';
+    END IF;
+
+    IF p_tipo = 'COLEGIAL' THEN
+        IF p_nivel_actual IS NULL OR p_curso_actual IS NULL OR p_turno_actual IS NULL THEN
+            RAISE EXCEPTION 'Para COLEGIAL: nivel_actual, curso_actual y turno_actual son obligatorios';
+        END IF;
+        IF p_carrera IS NOT NULL OR p_anio_ingreso IS NOT NULL THEN
+            RAISE EXCEPTION 'Para COLEGIAL no se admiten carrera ni anio_ingreso';
+        END IF;
+    ELSIF p_tipo = 'UNIVERSITARIO' THEN
+        IF p_carrera IS NULL OR p_anio_ingreso IS NULL THEN
+            RAISE EXCEPTION 'Para UNIVERSITARIO: carrera y anio_ingreso son obligatorios';
+        END IF;
+        IF p_nivel_actual IS NOT NULL OR p_curso_actual IS NOT NULL OR p_turno_actual IS NOT NULL THEN
+            RAISE EXCEPTION 'Para UNIVERSITARIO no se admiten nivel/curso/turno';
+        END IF;
+    END IF;
+
+    -- 4) Generar código si no se envió
+    v_codigo := COALESCE(
+        p_codigo_estudiante,
+        'STD-' || to_char(now(), 'YYMM') || '-' || lpad(v_id_persona::text, 6, '0')
+    );
+
+    -- 5) Insertar en persona_estudiante
+    INSERT INTO persona.persona_estudiante(
+        id_persona, codigo_estudiante, id_unidad_educativa, tipo,
+        nivel_actual, curso_actual, turno_actual,
+        carrera, anio_ingreso,
+        fecha_registro, id_usuario, version_registro, estado_registro
+    )
+    VALUES(
+        v_id_persona, v_codigo, p_id_unidad_educativa, p_tipo,
+        p_nivel_actual, p_curso_actual, p_turno_actual,
+        p_carrera, p_anio_ingreso,
+        now(), p_id_usuario, 1, TRUE
+    );
+
+    RETURN v_id_persona;
+END;
+$$;
+
+
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_persona_usuario_nombre_usuario_lower
+ON persona.persona_usuario (lower(nombre_usuario));
+
+
+CREATE OR REPLACE FUNCTION persona.registrar_persona_y_usuario(
+    -- PERSONA (obligatorios: nombres, apellidos)
+    p_nombres              varchar(100),
+    p_apellidos            varchar(100),
+    p_telefono             varchar(100),
+    p_fecha_nacimiento     date,
+    p_email                varchar(200),
+
+    -- USUARIO
+    p_nombre_usuario       varchar(80),
+    p_contrasena_plana     text,
+    p_tipo_usuario         varchar(200),
+
+    -- Auditoría
+    p_id_usuario_creador   bigint,
+
+    -- OUT
+    OUT o_id_persona       bigint,
+    OUT o_nombre_usuario   varchar
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_hash text;
+BEGIN
+    -- Validaciones mínimas de persona
+    IF coalesce(trim(p_nombres),'') = '' THEN
+        RAISE EXCEPTION 'nombres es obligatorio';
+    END IF;
+    IF coalesce(trim(p_apellidos),'') = '' THEN
+        RAISE EXCEPTION 'apellidos es obligatorio';
+    END IF;
+
+    -- Validaciones de usuario
+    IF coalesce(trim(p_nombre_usuario),'') = '' THEN
+        RAISE EXCEPTION 'El nombre de usuario es obligatorio';
+    END IF;
+    IF p_contrasena_plana IS NULL OR length(p_contrasena_plana) < 6 THEN
+        RAISE EXCEPTION 'La contraseña es obligatoria y debe tener al menos 6 caracteres';
+    END IF;
+
+    -- Unicidad case-insensitive
+    IF EXISTS (
+        SELECT 1
+          FROM persona.persona_usuario u
+         WHERE lower(u.nombre_usuario) = lower(p_nombre_usuario)
+    ) THEN
+        RAISE EXCEPTION 'El nombre de usuario "%" ya está en uso', p_nombre_usuario;
+    END IF;
+
+    -- 1) Insertar PERSONA
+    INSERT INTO persona.persona(
+        nombres, apellidos, telefono, fecha_nacimiento, email,
+        estado_registro, fecha_registro, version_registro, id_usuario_creador
+    )
+    VALUES (
+        p_nombres, p_apellidos, p_telefono, p_fecha_nacimiento, p_email,
+        'Activo', now(), 1, p_id_usuario_creador
+    )
+    RETURNING id_persona INTO o_id_persona;
+
+    -- 2) Hash de contraseña (bcrypt con cost 12)
+    v_hash := crypt(p_contrasena_plana, gen_salt('bf', 12));
+
+    -- 3) Insertar USUARIO
+    INSERT INTO persona.persona_usuario(
+        id_persona, nombre_usuario, contrasena_hash, tipo_usuario,
+        estado_registro, fecha_registro, version_registro, id_usuario_creador
+    )
+    VALUES (
+        o_id_persona, p_nombre_usuario, v_hash, p_tipo_usuario,
+        'Activo', now(), 1, p_id_usuario_creador
+    );
+
+    o_nombre_usuario := p_nombre_usuario;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION persona.cambiar_contrasena_usuario(
+    p_nombre_usuario          varchar(80),
+    p_contrasena_actual      text,
+    p_contrasena_nueva       text,
+    p_id_usuario_modificacion bigint DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_hash_actual text;
+    v_ok          boolean;
+BEGIN
+    IF coalesce(trim(p_nombre_usuario), '') = '' THEN
+        RAISE EXCEPTION 'El nombre de usuario es obligatorio';
+    END IF;
+    IF p_contrasena_nueva IS NULL OR length(p_contrasena_nueva) < 6 THEN
+        RAISE EXCEPTION 'La nueva contraseña debe tener al menos 6 caracteres';
+    END IF;
+
+    SELECT contrasena_hash
+      INTO v_hash_actual
+      FROM persona.persona_usuario
+     WHERE lower(nombre_usuario) = lower(p_nombre_usuario);
+
+    IF v_hash_actual IS NULL THEN
+        RAISE EXCEPTION 'Usuario "%" no encontrado', p_nombre_usuario;
+    END IF;
+
+    -- Validar contraseña actual
+    v_ok := (v_hash_actual = crypt(p_contrasena_actual, v_hash_actual));
+    IF NOT v_ok THEN
+        RAISE EXCEPTION 'La contraseña actual no es correcta';
+    END IF;
+
+    -- Actualizar con nuevo hash
+    UPDATE persona.persona_usuario
+       SET contrasena_hash      = crypt(p_contrasena_nueva, gen_salt('bf', 12)),
+           fecha_modificacion   = now(),
+           version_registro     = coalesce(version_registro, 1) + 1,
+           id_usuario_modificacion = p_id_usuario_modificacion
+     WHERE lower(nombre_usuario) = lower(p_nombre_usuario);
+
+    RETURN TRUE;
+END;
+$$;
+
+
+SELECT *
+FROM persona.registrar_persona_y_usuario(
+  'Pablo', 'Arauz', '777377232', DATE '2001-12-07', 'pabliarca@gmail.com',
+  'pablo.arauz', '72107014Casa', 'ADMIN',
+);
+
+select * from persona.persona_usuario;
+
+
+create schema if not exists auditoria;
+
+drop table if exists auditoria.sesion;
+create table auditoria.sesion(
+	id_sesion bigserial primary key,
+	ip_usuario text not null,
+	id_usuario int not null references persona.persona_usuario(id_persona),
+	timestamp_entrada		timestamptz  DEFAULT now(),
+	timestamp_salida		timestamptz  DEFAULT now(),
+	
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint		
+);
+
+
+
+create table auditoria.tipo_accion(
+	id_tipo_accion  bigserial primary key,
+	nombre_accion text not null,
+	tipo_accion text not null,
+	tipo_controller text,
+	html_id_controller text,
+	
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint			
+);
+
+
+create table auditoria.solicitudes_web(
+	id_solicitud bigserial primary key,
+	http_code text not null,
+	solicitud json not null,
+	cod_solicitud_respuesta text,
+	tam_bytes_solicitud int,
+	
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint			
+);
+
+
+create table auditoria.action_logger(
+	id_accion bigserial primary key,
+	id_sesion int not null references auditoria.sesion(id_sesion),
+	id_tipo_accion int not null references auditoria.tipo_accion(id_tipo_accion),
+	
+	estado_registro        varchar(20) DEFAULT 'Activo',
+	fecha_registro         timestamptz  DEFAULT now(),
+	fecha_modificacion     timestamptz,
+	version_registro       int          DEFAULT 1,
+	id_usuario_creador     bigint,
+	id_usuario_modificacion bigint		
+);
+
+
+CREATE OR REPLACE FUNCTION persona.autenticar_usuario(
+    p_nombre_usuario   varchar(80),
+    p_contrasena_plana text
+)
+RETURNS TABLE (
+    ok              boolean,
+    id_persona      bigint,
+    nombre          varchar,
+    apellidos       varchar,
+    nombre_usuario  varchar,
+    tipo_usuario    varchar
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_hash_db   text;
+    v_id_persona bigint;
+    v_tipo       varchar;
+    v_user_norm  varchar;
+    v_estado_u   varchar(20);
+    v_estado_p   varchar(20);
+BEGIN
+    -- 1) Traer (si existe) el registro del usuario
+    SELECT u.contrasena_hash,
+           u.id_persona,
+           u.tipo_usuario,
+           u.nombre_usuario,
+           u.estado_registro
+    INTO   v_hash_db, v_id_persona, v_tipo, v_user_norm, v_estado_u
+    FROM persona.persona_usuario u
+    WHERE lower(u.nombre_usuario) = lower(p_nombre_usuario)
+    LIMIT 1;
+
+    -- 2) Comparación de contraseña en tiempo "constante"
+    --    (si no existe el usuario, usamos un salt aleatorio para evitar filtrado por timing)
+    IF v_hash_db IS NULL THEN
+        PERFORM crypt(p_contrasena_plana, gen_salt('bf'));
+        RETURN QUERY SELECT FALSE, NULL::bigint, NULL::varchar, NULL::varchar, NULL::varchar, NULL::varchar;
+        RETURN;
+    END IF;
+
+    -- 3) Validación de contraseña
+    IF v_hash_db <> crypt(p_contrasena_plana, v_hash_db) THEN
+        RETURN QUERY SELECT FALSE, NULL::bigint, NULL::varchar, NULL::varchar, NULL::varchar, NULL::varchar;
+        RETURN;
+    END IF;
+
+    -- 4) Validar estado 'Activo' en usuario y persona
+    SELECT p.estado_registro
+      INTO v_estado_p
+      FROM persona.persona p
+     WHERE p.id_persona = v_id_persona;
+
+    IF v_estado_u IS DISTINCT FROM 'Activo' OR v_estado_p IS DISTINCT FROM 'Activo' THEN
+        RETURN QUERY SELECT FALSE, NULL::bigint, NULL::varchar, NULL::varchar, NULL::varchar, NULL::varchar;
+        RETURN;
+    END IF;
+
+    -- 5) Devolver datos mínimos para sesión
+    RETURN QUERY
+    SELECT TRUE,
+           p.id_persona,
+           p.nombres,
+           p.apellidos,
+           v_user_norm,
+           v_tipo
+    FROM persona.persona p
+    WHERE p.id_persona = v_id_persona;
+END;
+$$;
+
+SELECT * FROM persona.autenticar_usuario('pablo.arauz', '72107014Casa');
