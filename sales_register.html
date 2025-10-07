@@ -11,6 +11,7 @@
         <link href = "./Styles/CSS/global_styles.css" rel = "stylesheet">
         <link href = "./Styles/CSS/header_style.css" rel = "stylesheet">
         <link href = "./Styles/CSS/controllers_styles.css" rel = "stylesheet">
+        <link href = "./Styles/CSS/sales_register_styles.css" rel = "stylesheet">
 
         <title>Sistema contable-CPA</title>
         <!---->
@@ -30,14 +31,186 @@
             <h1>
                 Registro de ventas 
             </h1>
-            <hr/>
             <section id = "sales_by_hour" class = "section_style">
                 <form>
                     <div>
+                        <fieldset>
+                            <legend>Datos generales</legend>
+                            <label for = "fecha_transaccion_venta_clase_x_hora">Fecha:</label>
+                            <input id = "fecha_transaccion_venta_clase_x_hora" name = "fecha_transaccion_venta" type="date">
 
-                    </div>
-                    <div>
-                        
+                            <label>Responsable/Padre:</label>
+                            <select id = "responsable" name="responsable">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>   
+
+                            </select>
+
+                            <label for = "estudiante">Estudiante:</label>
+                            <select id = "estudiante" name="estudiante">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>   
+
+                            </select>
+                                                       <label>Sucursal:</label>
+                            <select id = "sucursal" name="sucursal">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>   
+
+                            </select>
+                            
+
+                        </fieldset>
+                        <fieldset>
+                            <legend>Datos de pago</legend>
+
+                            <label for = "efectivo">Efectivo:</label>
+                            <input id = "efectivo" name = "efectivo" type="text" placeholder="Ingrese monto en efectivo">
+
+                            <label for = "qr">QR:</label>
+                            <input id = "qr" name = "qr" type="text" placeholder="Ingrese monto en QR">
+
+                            <label for = "cxc">Cuentas por cobrar:</label>
+                            <input id = "cxc" name = "cxc" type="text" placeholder="Ingrese monto en cuentas por cobrar">
+
+                            <label for = "paquete">Paquete:</label>
+                            <input id = "paquete" name = "paquete" type="text" placeholder="Ingrese monto a cobrar con paquete">
+
+                            <label for = "anticipo">Anticipo:</label>
+                            <input id = "anticipo" name = "anticipo" type="text" placeholder="Ingrese monto a cobrar con anticipo">
+                        </fieldset>
+
+                        <fieldset class = "form_horizontal form_mltp_columns">
+                            <legend>Venta de clase por hora</legend>
+
+                            <div>
+                                <label for = "hora_llegada">Hora:</label>
+                                <input id = "hora_llegada" name = "hora_llegada" type="time" name="sale_time">
+                            </div>
+                            
+                            <div>
+                                <label for = "horas_pasadas">Horas pasadas:</label>
+                                <input id = "horas_pasadas" name = "horas_pasadas" type="number" name="sale_time">
+                            </div>
+                            
+                            <div>
+                                <label for = "materia">Materia:</label>
+                                <select id = "materia" name="materia">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>   
+                                    
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for = "tema">Tema:</label>
+                                <select id = "tema" name="tema">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>                               
+                                    
+                                </select>
+                            </div>
+                            <div>
+                                <label for = "subtema">Subtema:</label>
+                                <select id = "subtema" name="subtema">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>                               
+
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for = "modalidad">Modalidad:</label>
+                                <select id = "modalidad" name="modalidad">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>   
+                                    <option value="Presencial">Presencial</option>
+                                    <option value="Virtual">Virtual</option>                            
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for = "motivo">Motivo:</label>
+                                <select id = "motivo" name="motivo">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>   
+                                    <option value="Exámen">Exámen</option>
+                                    <option value="Práctico">Práctico</option>                            
+                                    <option value="Nivelación">Nivelación</option>                            
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for = "tutor">Tutor:</label>
+                                <select id = "tutor" name="tutor">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>   
+
+                                </select>
+                            </div>
+
+                            <div>
+                                <label>Aula:</label>
+                                <select id = "aula" name="aula">
+                                    <option value="" disabled hidden selected>Seleccione una opción</option>   
+
+                                </select>
+                            </div>
+
+                            <div>
+                                <label for = "recargo">Recargo:</label>
+                                <input id = "recargo" name = "recargo" type="text" placeholder="Ingrese monto recargo">
+                            </div>
+
+                            <div>
+                                <label for = "descuento">Descuento:</label>
+                                <input id = "descuento" name = "recargo" type="text" placeholder="Ingrese monto descuento">
+                            </div>                                                        <div>
+                                <label for = "glosa">Glosa (adicional):</label>
+                                <input id = "glosa" name = "glosa" type="text" placeholder="Ingrese glosa (notas adicionales)">
+                            </div>
+
+                            <div class = "button_div">
+                                <button id = "agregar_clase_por_hora" type="button">Agregar</button>  
+                            </div>
+
+                        </fieldset>
+                        <fieldset>
+                            <legend>Venta de clase por paquete</legend>
+                            <label for = "paquete">Paquete:</label>
+                            <select id = "aula" name="aula">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>   
+                            </select>
+
+                            <label for = "descuento">Descuento:</label>
+                            <input id = "descuento" name = "recargo" type="text" placeholder="Ingrese monto descuento">
+                            
+                            <div class = "button_div">
+                                <button id = "agregar_clase_paquete" type="button">Agregar</button>  
+                            </div>
+                        </fieldset>
+                        <fieldset>
+                            <legend>Venta de productos de tienda</legend>
+                            <label>Producto (tienda):</label>
+                            <select id = "producto" name="aula">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>
+                            
+                            </select>
+
+                            <label for = "cantidad">Cantidad:</label>
+                            <input id = "cantidad" name = "cantidad" type="number" name="cantidad">
+                            <div class = "button_div">
+                                <button id = "agregar_clase_paquete" type="button">Agregar</button>  
+                            </div>
+                        </fieldset>
+
+                        <fieldset class = "form_horizontal">
+                            <legend>Detalle de venta</legend>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Id-Producto</th>
+                                        <th>Descripción</th>
+                                        <th>Cantidad</th>
+                                        <th>Precio unitario</th>
+                                        <th>Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody id = "detalle_venta_body">
+
+                                </tbody>
+                        </fieldset>
                     </div>
                 </form>
             </section>

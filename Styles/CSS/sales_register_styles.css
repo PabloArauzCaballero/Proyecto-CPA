@@ -1,0 +1,39 @@
+div{
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); 
+    column-gap: 2rem;
+}
+
+.form_horizontal{
+    grid-column: span 2;
+}
+
+.form_mltp_columns{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+    grid-template-rows: auto;
+    column-gap: 2rem;
+
+}
+
+.form_mltp_columns div{
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem;
+}
+
+.form_mltp_columns input{
+    margin-bottom: 0;
+}
+
+.button_div{
+    grid-column: span 2; 
+    display: grid;       
+    grid-template-columns: 1fr;     
+    justify-self: right;     
+}
+
+button{
+    width: 100%;
+    margin: 1rem;
+}

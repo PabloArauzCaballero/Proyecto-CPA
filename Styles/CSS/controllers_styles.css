@@ -13,10 +13,24 @@ button{
     font-weight: bold;
 }
 
-input[type="text"], input[type="password"], input[type = "date"], select, textarea {
+input[type="text"], input[type="password"], input[type = "date"], input[type = "time"], input[type = "number"], select, textarea {
     width: 100%;               
     padding: 10px;            
     border: 1px solid #ccc;   
     border-radius: 5px;       
     margin-bottom: 1.5rem;
+}
+
+fieldset{
+    padding: 0.5rem;
+    border: lightgray 1px solid;
+    border-radius: 5px;
+    padding: 0 1.5rem;
+    margin-bottom: 2rem;
+}
+
+legend {
+    font-size: 1rem;
+    font-weight: bold;
+    margin-bottom: 1rem;
 }
