@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 
 <html lang="es">
@@ -194,21 +195,73 @@
                                 <button id = "agregar_clase_paquete" type="button">Agregar</button>  
                             </div>
                         </fieldset>
+                        
+                        
+                        <fieldset>
+                            <legend>Curso</legend>
+                            <label>Curso versión:</label>
+                            <select id = "producto" name="aula">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>
+                            
+                            </select>
+                            
+                            <label for = "descuento">Descuento:</label>
+                            <input id = "descuento" name = "recargo" type="text" placeholder="Ingrese monto descuento">
+                            
+                            <div class = "button_div">
+                                <button id = "agregar_clase_paquete" type="button">Agregar</button>  
+                            </div>
+                        </fieldset>
+                        
+                        <fieldset>
+                            <legend>Producto educativo</legend>
+                            <label>Producto educativo</label>
+                            <select id = "producto" name="aula">
+                                <option value="" disabled hidden selected>Seleccione una opción</option>
+                            
+                            </select>
+                            
+                            <label for = "descuento">Descuento:</label>
+                            <input id = "descuento" name = "recargo" type="text" placeholder="Ingrese monto descuento">
+                            
+                            <div class = "button_div">
+                                <button id = "agregar_clase_paquete" type="button">Agregar</button>  
+                            </div>
+                        </fieldset>
 
                         <fieldset class = "form_horizontal">
                             <legend>Detalle de venta</legend>
                             <table>
                                 <thead>
                                     <tr>
-                                        <th>Id-Producto</th>
-                                        <th>Descripción</th>
-                                        <th>Cantidad</th>
-                                        <th>Precio unitario</th>
-                                        <th>Subtotal</th>
+                                        <th class = "short">Id-Producto</th>
+                                        <th>Descripción</th>    
+                                        <th class = "short">Tipo</th>
+                                        <th class = "short">Cantidad</th>
+                                        <th class = "large">Precio unitario</th>
+                                        <th class = "large">Subtotal</th>
+                                        <th id = "button_col">Eliminar</th>
                                     </tr>
                                 </thead>
                                 <tbody id = "detalle_venta_body">
-
+                                    <tr>
+                                        <td>1</td>
+                                        <td>Clases por hora (matemáticas)</td>
+                                        <td>Producto educativo</td>
+                                        <td>2</td>
+                                        <td>15</td>
+                                        <td class = "subbtotal">30</td>
+                                        <td><button class= "icon" type ="button">Borrar</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>1</td>
+                                        <td>Clases por hora (física)</td>
+                                        <td>Tienda</td>
+                                        <td>2</td>
+                                        <td>15</td>
+                                        <td class = "subbtotal">30</td>
+                                        <td><button class= "icon" type ="button">Borrar</button></td>
+                                    </tr>
                                 </tbody>
                         </fieldset>
                     </div>

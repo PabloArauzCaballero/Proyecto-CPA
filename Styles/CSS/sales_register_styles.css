@@ -34,6 +34,48 @@ div{
 }
 
 button{
-    width: 100%;
     margin: 1rem;
+}
+
+
+table{
+    width: 100%;
+}
+
+th{
+    border-top: solid #d9e6f9 0.5px;
+    background-color: #d9e6f9;
+    font-weight: normal;
+}
+
+td{
+    border-bottom: solid #d9e6f9 0.5px;
+}
+
+th, td{
+    padding: 0.35rem 0;
+    text-align: center;
+    font-size: small;
+
+}
+
+.short{
+    max-width: 2.25rem;
+}
+
+.large{
+    max-width: 2rem;
+}
+
+.subbtotal{
+    background-color: rgba(211, 211, 211, 0.685);
+}
+
+button.icon{
+    margin: 0;
+}
+
+#button_col{
+    width: 1rem;
+    max-width: 1rem;
 }
